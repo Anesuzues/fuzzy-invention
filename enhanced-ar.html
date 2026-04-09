@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced AR Hand Tracking</title>
+    
+    <!-- MediaPipe Hands CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --bg-color: #0a0a0f;
+            --text-color: #ffffff;
+            --glass-bg: rgba(15, 20, 35, 0.6);
+            --glass-border: rgba(255, 255, 255, 0.2);
+            --glass-blur: blur(20px);
+            --accent: #00ffcc;
+            --neon-glow: 0 0 20px currentColor;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%);
+            color: var(--text-color);
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Animated background stars */
+        .stars {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .star {
+            position: absolute;
+            background: white;
+            border-radius: 50%;
+            animation: twinkle 3s infinite;
+        }
+
+        @keyframes twinkle {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.2); }
+        }
+
+        .video-container {
+            position: absolute;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        .input_video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 1;
+            filter: brightness(0.4) contrast(1.2) saturate(1.1);
+        }
+
+        #bgCanvas, #mainCanvas, #particleCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            pointer-events: none;
+        }
+        
+        #bgCanvas { z-index: 2; }
+        #mainCanvas { z-index: 4; }
+        #particleCanvas { z-index: 3; }
+
+        /* Enhanced UI */
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            pointer-events: none;
+        }
+
+        .panel {
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 20px 25px;
+            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .panel:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        }
+
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 0.95rem;
+            color: rgba(255, 255, 255, 0.9);
+            min-width: 200px;
+        }
+        .stat:last-child { margin-bottom: 0; }
+        .stat span.val { 
+            font-weight: bold; 
+            color: var(--accent);
+            text-shadow: var(--neon-glow);
+            transition: all 0.3s ease;
+        }
+
+        /* Enhanced themes */
+        #themes {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            gap: 12px;
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: 40px;
+            padding: 12px;
+            transition: all 0.5s ease;
+        }
+
+        .theme-btn {
+            background: transparent;
+            border: 2px solid transparent;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .theme-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .theme-btn:hover::before {
+            left: 100%;
+        }
+        
+        .theme-btn.active {
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.4);
+            text-shadow: 0 0 15px white;
+            box-shadow: 0 0 20px rgba(255,255,255,0.3);
+        }
+
+        /* Enhanced start overlay */
+        #startOverlay {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(0,0,0,0.9) 0%, rgba(20,20,40,0.95) 100%);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(15px);
+            transition: all 0.8s ease;
+        }
+
+        .start-title {
+            font-size: 3.5rem;
+            font-weight: 100;
+            letter-spacing: 8px;
+            margin-bottom: 20px;
+            background: linear-gradient(45deg, #ff00cc, #00f0ff, #ffff00, #ff00cc);
+            background-size: 400% 400%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: gradientShift 3s ease-in-out infinite;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        .start-btn {
+            padding: 20px 50px;
+            font-size: 1.3rem;
+            background: linear-gradient(45deg, #ff00cc, #3333ff, #00ffcc);
+            background-size: 300% 300%;
+            border: none;
+            color: white;
+            border-radius: 40px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            animation: buttonGlow 2s ease-in-out infinite alternate;
+        }
+
+        @keyframes buttonGlow {
+            0% { box-shadow: 0 0 20px rgba(255, 0, 204, 0.5); }
+            100% { box-shadow: 0 0 40px rgba(255, 0, 204, 0.8), 0 0 60px rgba(0, 240, 255, 0.3); }
+        }
+
+        .start-btn:hover { 
+            transform: scale(1.05);
+            background-position: 100% 0;
+        }
+
+        .hidden { 
+            opacity: 0; 
+            pointer-events: none; 
+            transform: translateY(20px);
+        }
+
+        /* Performance indicator */
+        .performance-indicator {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 10px 15px;
+            font-size: 0.9rem;
+        }
+
+        .fps-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #00ff00;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Animated background stars -->
+    <div class="stars" id="stars"></div>
+
+    <!-- Start Overlay -->
+    <div id="startOverlay">
+        <h1 class="start-title">NEON AURA AR</h1>
+        <p style="margin-bottom: 40px; color: #aaa; font-size: 1.1rem;">Enhanced hand tracking with advanced visual effects</p>
+        <button class="start-btn" id="startBtn">Enter Experience</button>
+    </div>
+
+    <div class="video-container">
+        <video class="input_video" autoplay playsinline></video>
+        <canvas id="bgCanvas"></canvas>
+        <canvas id="particleCanvas"></canvas>
+        <canvas id="mainCanvas"></canvas>
+    </div>
+
+    <!-- Enhanced UI -->
+    <div id="hud" class="hidden">
+        <div class="panel">
+            <div class="stat">Hands Detected: <span class="val" id="ui-hands">0</span></div>
+            <div class="stat">Hand Speed: <span class="val" id="ui-speed">0</span></div>
+        </div>
+        <div class="panel">
+            <div class="stat">Gesture: <span class="val" id="ui-gesture">None</span></div>
+            <div class="stat">Spread: <span class="val" id="ui-spread">0%</span></div>
+            <div class="stat">Energy: <span class="val" id="ui-energy">0%</span></div>
+        </div>
+    </div>
+
+    <div class="performance-indicator hidden" id="perfIndicator">
+        <div class="fps-indicator"></div>
+        <span id="ui-fps">0</span> FPS
+    </div>
+
+    <div id="themes" class="hidden">
+        <button class="theme-btn active" data-theme="Rainbow">Rainbow</button>
+        <button class="theme-btn" data-theme="Cyberpunk">Cyberpunk</button>
+        <button class="theme-btn" data-theme="Lava">Lava</button>
+        <button class="theme-btn" data-theme="Ocean">Ocean</button>
+        <button class="theme-btn" data-theme="Galaxy">Galaxy</button>
+        <button class="theme-btn" data-theme="Aurora">Aurora</button>
+    </div>
+
+<script>
+/** 
+ * ENHANCED GLOBALS & CONFIG
+ */
+const videoElement = document.querySelector('.input_video');
+const bgCanvas = document.getElementById('bgCanvas');
+const mainCanvas = document.getElementById('mainCanvas');
+const particleCanvas = document.getElementById('particleCanvas');
+const bgCtx = bgCanvas.getContext('2d');
+const ctx = mainCanvas.getContext('2d');
+const particleCtx = particleCanvas.getContext('2d');
+
+let width = window.innerWidth;
+let height = window.innerHeight;
+
+let time = 0;
+let lastTime = performance.now();
+let framesThisSecond = 0;
+let lastFpsTime = performance.now();
+
+let currentHands = [];
+let handVelocities = 0;
+let handTrails = []; // Enhanced trail system
+let energyLevel = 0; // Global energy that builds with interaction
+
+// Enhanced Theme Config
+let currentTheme = 'Rainbow';
+const themes = {
+    'Rainbow': {
+        color: (t, index, total) => `hsl(${(t * 80 + index * (360/total)) % 360}, 90%, 65%)`,
+        bg: (t) => `hsl(${(t * 30) % 360}, 40%, 5%)`,
+        particle: (t, index) => `hsl(${(t * 100 + index * 60) % 360}, 100%, 70%)`
+    },
+    'Cyberpunk': {
+        color: (t, index, total) => (index % 2 === 0) ? '#ff0080' : '#00ffff',
+        bg: (t) => '#0a0a0f',
+        particle: (t, index) => (index % 3 === 0) ? '#ff0080' : (index % 3 === 1) ? '#00ffff' : '#ffff00'
+    },
+    'Lava': {
+        color: (t, index, total) => `hsl(${(15 + Math.sin(t + index) * 20)}, 100%, ${60 + Math.sin(t * 2) * 15}%)`,
+        bg: (t) => `hsl(0, 50%, ${3 + Math.sin(t) * 2}%)`,
+        particle: (t, index) => `hsl(${(index * 30) % 60}, 100%, 70%)`
+    },
+    'Ocean': {
+        color: (t, index, total) => `hsl(${200 + Math.sin(t + index) * 40}, 80%, 60%)`,
+        bg: (t) => `hsl(220, 60%, 5%)`,
+        particle: (t, index) => `hsl(${180 + (index * 20)}, 90%, 65%)`
+    },
+    'Galaxy': {
+        color: (t, index, total) => `hsl(${280 + Math.sin(t * 1.5 + index) * 50}, 90%, 70%)`,
+        bg: (t) => `hsl(260, 40%, 3%)`,
+        particle: (t, index) => `hsl(${260 + Math.sin(t + index) * 80}, 100%, 75%)`
+    },
+    'Aurora': {
+        color: (t, index, total) => `hsl(${120 + Math.sin(t * 0.8 + index) * 100}, 70%, 60%)`,
+        bg: (t) => `hsl(200, 30%, 4%)`,
+        particle: (t, index) => `hsl(${100 + Math.sin(t * 2 + index) * 120}, 80%, 65%)`
+    }
+};
+
+// Enhanced Physics
+let particles = [];
+let ripples = [];
+let trails = [];
+let energyOrbs = [];
+const FINGER_TIPS = [4, 8, 12, 16, 20];
+
+// Enhanced Background
+let matrixColumns = [];
+let stars = [];
+const fontSize = 14;
+let maxColumns = 0;
+
+// Audio
+let audioCtx = null;
+let humOsc = null;
+let humGain = null;
+
+// UI Elements
+const uiHands = document.getElementById('ui-hands');
+const uiFps = document.getElementById('ui-fps');
+const uiGesture = document.getElementById('ui-gesture');
+const uiSpread = document.getElementById('ui-spread');
+const uiSpeed = document.getElementById('ui-speed');
+const uiEnergy = document.getElementById('ui-energy');
+
+/**
+ * ENHANCED INITIALIZATION
+ */
+function createStars() {
+    const starsContainer = document.getElementById('stars');
+    for (let i = 0; i < 100; i++) {
+        const star = document.createElement('div');
+        star.className = 'star';
+        star.style.left = Math.random() * 100 + '%';
+        star.style.top = Math.random() * 100 + '%';
+        star.style.width = star.style.height = (Math.random() * 3 + 1) + 'px';
+        star.style.animationDelay = Math.random() * 3 + 's';
+        starsContainer.appendChild(star);
+    }
+}
+
+function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    
+    [bgCanvas, mainCanvas, particleCanvas].forEach(canvas => {
+        canvas.width = width;
+        canvas.height = height;
+    });
+    
+    maxColumns = Math.floor(width / fontSize);
+    matrixColumns = new Array(maxColumns).fill(1).map(() => Math.random() * height/fontSize);
+}
+
+window.addEventListener('resize', resize);
+resize();
+createStars();
+
+// Enhanced theme switching
+document.querySelectorAll('.theme-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        currentTheme = e.target.getAttribute('data-theme');
+        
+        // Smooth theme transition effect
+        const themeColor = themes[currentTheme].color(time, 1, 1);
+        document.documentElement.style.setProperty('--accent', themeColor);
+        
+        // Create transition particles
+        for (let i = 0; i < 20; i++) {
+            createParticle({
+                x: Math.random() * width,
+                y: Math.random() * height
+            }, themeColor, 'theme-change');
+        }
+    });
+});
+
+// Enhanced start sequence
+document.getElementById('startBtn').addEventListener('click', () => {
+    document.getElementById('startOverlay').classList.add('hidden');
+    document.getElementById('hud').classList.remove('hidden');
+    document.getElementById('themes').classList.remove('hidden');
+    document.getElementById('perfIndicator').classList.remove('hidden');
+    
+    initAudio();
+    initMediaPipe();
+    requestAnimationFrame(renderLoop);
+});
+
+/**
+ * ENHANCED AUDIO ENGINE
+ */
+function initAudio() {
+    try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Enhanced ambient hum with filters
+        humOsc = audioCtx.createOscillator();
+        humGain = audioCtx.createGain();
+        const filter = audioCtx.createBiquadFilter();
+        
+        humOsc.type = 'sine';
+        humOsc.frequency.value = 80;
+        
+        filter.type = 'lowpass';
+        filter.frequency.value = 400;
+        filter.Q.value = 5;
+        
+        humGain.gain.value = 0;
+        
+        humOsc.connect(filter);
+        filter.connect(humGain);
+        humGain.connect(audioCtx.destination);
+        humOsc.start();
+    } catch(e) {
+        console.error("Web Audio API failed", e);
+    }
+}
+
+function triggerEnhancedZap(intensity = 1) {
+    if (!audioCtx) return;
+    
+    // Multi-layered zap sound
+    for (let i = 0; i < 3; i++) {
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        const filter = audioCtx.createBiquadFilter();
+        
+        osc.type = ['sawtooth', 'square', 'triangle'][i];
+        osc.frequency.setValueAtTime(1200 - i * 300, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(60 + i * 20, audioCtx.currentTime + 0.15);
+        
+        filter.type = 'bandpass';
+        filter.frequency.value = 800 - i * 200;
+        filter.Q.value = 10;
+        
+        gainNode.gain.setValueAtTime(0.3 * intensity, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+        
+        osc.connect(filter);
+        filter.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        osc.start(audioCtx.currentTime + i * 0.02);
+        osc.stop(audioCtx.currentTime + 0.25);
+    }
+}
+
+function updateEnhancedHum(activeHands) {
+    if (!audioCtx || !humGain) return;
+    
+    if (activeHands.length === 0) {
+        humGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.2);
+        return;
+    }
+
+    // Enhanced frequency modulation based on energy level
+    const baseFreq = 80 + energyLevel * 120;
+    const targetVolume = 0.03 + energyLevel * 0.1;
+    
+    if (activeHands.length >= 2) {
+        const p1 = activeHands[0][8];
+        const p2 = activeHands[1][8];
+        const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+        
+        const proximityMod = (1 - Math.min(dist, 1)) * 200;
+        humOsc.frequency.setTargetAtTime(baseFreq + proximityMod, audioCtx.currentTime, 0.1);
+        humGain.gain.setTargetAtTime(targetVolume + proximityMod * 0.001, audioCtx.currentTime, 0.1);
+    } else {
+        humOsc.frequency.setTargetAtTime(baseFreq, audioCtx.currentTime, 0.1);
+        humGain.gain.setTargetAtTime(targetVolume, audioCtx.currentTime, 0.1);
+    }
+}
+
+/**
+ * ENHANCED MATH & UTILITIES
+ */
+function getDist(p1, p2) {
+    return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+}
+
+function mapToCanvas(point) {
+    return { x: point.x * width, y: point.y * height };
+}
+
+function lerp(a, b, t) {
+    return a + (b - a) * t;
+}
+
+function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+}
+
+/**
+ * ENHANCED PARTICLE SYSTEM
+ */
+function createParticle(pos, color, type = 'default', velocity = null) {
+    const particle = {
+        x: pos.x,
+        y: pos.y,
+        vx: velocity ? velocity.x : (Math.random() - 0.5) * 12,
+        vy: velocity ? velocity.y : (Math.random() - 0.5) * 12,
+        life: 1.0,
+        maxLife: 1.0,
+        color: color,
+        size: Math.random() * 4 + 2,
+        type: type,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 0.2
+    };
+    
+    // Type-specific properties
+    switch(type) {
+        case 'spark':
+            particle.size = Math.random() * 2 + 1;
+            particle.life = 0.8;
+            particle.maxLife = 0.8;
+            break;
+        case 'energy':
+            particle.size = Math.random() * 6 + 3;
+            particle.life = 1.5;
+            particle.maxLife = 1.5;
+            particle.vx *= 0.5;
+            particle.vy *= 0.5;
+            break;
+        case 'theme-change':
+            particle.size = Math.random() * 8 + 4;
+            particle.life = 2.0;
+            particle.maxLife = 2.0;
+            break;
+    }
+    
+    particles.push(particle);
+}
+
+function createEnergyOrb(pos, color) {
+    energyOrbs.push({
+        x: pos.x,
+        y: pos.y,
+        targetX: pos.x,
+        targetY: pos.y,
+        radius: 0,
+        maxRadius: 20 + Math.random() * 30,
+        life: 1.0,
+        color: color,
+        pulsePhase: Math.random() * Math.PI * 2,
+        driftSpeed: 0.5 + Math.random() * 1.5
+    });
+}
+
+function createEnhancedRipple(pos, color, intensity = 1) {
+    ripples.push({
+        x: pos.x,
+        y: pos.y,
+        radius: 0,
+        maxRadius: (100 + Math.random() * 150) * intensity,
+        life: 1.0,
+        color: color,
+        thickness: 2 + intensity * 3,
+        speed: 0.8 + intensity * 0.4
+    });
+}
+
+/**
+ * ENHANCED GESTURE DETECTION
+ */
+let lastPinchState = [false, false];
+let gestureHistory = [];
+let lastGestureTime = 0;
+
+function detectEnhancedGestures() {
+    if (!currentHands.length) return;
+    
+    const currentTime = performance.now();
+    
+    currentHands.forEach((hand, idx) => {
+        // Enhanced pinch detection
+        const thumb = hand[4];
+        const index = hand[8];
+        const middle = hand[12];
+        const ring = hand[16];
+        const pinky = hand[20];
+        
+        const pinchDist = getDist(thumb, index);
+        const isPinching = pinchDist < 0.04;
+        
+        if (isPinching && !lastPinchState[idx]) {
+            const midpoint = {
+                x: (thumb.x + index.x) / 2, 
+                y: (thumb.y + index.y) / 2
+            };
+            const canvasPos = mapToCanvas(midpoint);
+            
+            // Enhanced effects based on energy level
+            const intensity = 0.5 + energyLevel * 1.5;
+            createEnhancedRipple(canvasPos, themes[currentTheme].color(time, idx, 2), intensity);
+            createEnergyOrb(canvasPos, themes[currentTheme].particle(time, idx));
+            
+            // Create burst of particles
+            for (let i = 0; i < 8 + energyLevel * 12; i++) {
+                createParticle(canvasPos, themes[currentTheme].particle(time, i), 'spark');
+            }
+            
+            triggerEnhancedZap(intensity);
+            energyLevel = Math.min(energyLevel + 0.1, 1.0);
+            
+            uiGesture.innerText = "PINCH BURST!";
+            lastGestureTime = currentTime;
+        }
+        lastPinchState[idx] = isPinching;
+        
+        // Peace sign detection (index and middle extended)
+        const indexTip = hand[8];
+        const middleTip = hand[12];
+        const ringTip = hand[16];
+        const pinkyTip = hand[20];
+        const wrist = hand[0];
+        
+        const indexDist = getDist(indexTip, wrist);
+        const middleDist = getDist(middleTip, wrist);
+        const ringDist = getDist(ringTip, wrist);
+        const pinkyDist = getDist(pinkyTip, wrist);
+        
+        const isPeace = indexDist > 0.15 && middleDist > 0.15 && ringDist < 0.12 && pinkyDist < 0.12;
+        
+        if (isPeace && currentTime - lastGestureTime > 1000) {
+            // Peace sign creates a special effect
+            const palmPos = mapToCanvas(hand[0]);
+            for (let i = 0; i < 20; i++) {
+                const angle = (i / 20) * Math.PI * 2;
+                const vel = {
+                    x: Math.cos(angle) * 8,
+                    y: Math.sin(angle) * 8
+                };
+                createParticle(palmPos, themes[currentTheme].color(time, i, 20), 'energy', vel);
+            }
+            uiGesture.innerText = "PEACE WAVE";
+            lastGestureTime = currentTime;
+        }
+        
+        // Calculate hand spread
+        const spread = getDist(hand[8], hand[20]);
+        let spreadPct = Math.min(Math.round(spread * 250), 100);
+        uiSpread.innerText = spreadPct + '%';
+        
+        if (currentTime - lastGestureTime > 2000) {
+            uiGesture.innerText = spreadPct > 60 ? "Open Hand" : spreadPct < 30 ? "Fist" : "Relaxed";
+        }
+    });
+}
+
+/**
+ * ENHANCED PHYSICS & RENDERING
+ */
+function updateEnhancedPhysics() {
+    // Update particles with enhanced behaviors
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 0.016; // ~60fps decay
+        p.rotation += p.rotationSpeed;
+        
+        // Type-specific physics
+        switch(p.type) {
+            case 'spark':
+                p.vy += 0.2; // Gravity
+                p.vx *= 0.98; // Air resistance
+                break;
+            case 'energy':
+                p.vy += 0.05; // Light gravity
+                p.vx *= 0.95;
+                p.vy *= 0.95;
+                break;
+            case 'theme-change':
+                p.vy += 0.1;
+                p.vx *= 0.99;
+                break;
+        }
+        
+        if (p.life <= 0) {
+            particles.splice(i, 1);
+        }
+    }
+    
+    // Update energy orbs
+    for (let i = energyOrbs.length - 1; i >= 0; i--) {
+        let orb = energyOrbs[i];
+        
+        orb.pulsePhase += 0.1;
+        orb.radius = lerp(orb.radius, orb.maxRadius, 0.05);
+        orb.life -= 0.008;
+        
+        // Gentle drift
+        orb.x += Math.sin(orb.pulsePhase * 0.5) * orb.driftSpeed;
+        orb.y += Math.cos(orb.pulsePhase * 0.3) * orb.driftSpeed * 0.5;
+        
+        if (orb.life <= 0) {
+            energyOrbs.splice(i, 1);
+        }
+    }
+    
+    // Update ripples
+    for (let i = ripples.length - 1; i >= 0; i--) {
+        let r = ripples[i];
+        r.radius += (r.maxRadius - r.radius) * r.speed * 0.1;
+        r.life -= 0.02;
+        
+        if (r.life <= 0) {
+            ripples.splice(i, 1);
+        }
+    }
+    
+    // Decay energy level gradually
+    energyLevel = Math.max(energyLevel - 0.002, 0);
+}
+
+function drawEnhancedBackground() {
+    // Dynamic background based on theme and energy
+    const theme = themes[currentTheme];
+    const bgColor = theme.bg ? theme.bg(time) : '#0a0a0f';
+    
+    bgCtx.globalCompositeOperation = 'source-over';
+    bgCtx.fillStyle = bgColor;
+    bgCtx.fillRect(0, 0, width, height);
+    
+    // Enhanced matrix effect
+    bgCtx.globalCompositeOperation = 'screen';
+    bgCtx.font = fontSize + "px monospace";
+    
+    const speedMult = 1 + (handVelocities * 50) + (energyLevel * 30);
+    const density = 0.92 - (energyLevel * 0.1); // More particles when energized
+    
+    for (let i = 0; i < matrixColumns.length; i++) {
+        if (Math.random() > density) {
+            const char = String.fromCharCode(0x30A0 + Math.random() * 96);
+            const alpha = 0.3 + energyLevel * 0.4;
+            
+            bgCtx.fillStyle = theme.color(time, i % 10, 10);
+            bgCtx.globalAlpha = alpha;
+            bgCtx.fillText(char, i * fontSize, matrixColumns[i] * fontSize);
+        }
+        
+        matrixColumns[i] += Math.random() * speedMult;
+        
+        if (matrixColumns[i] * fontSize > height && Math.random() > 0.85) {
+            matrixColumns[i] = 0;
+        }
+    }
+    
+    bgCtx.globalAlpha = 1.0;
+    bgCtx.globalCompositeOperation = 'source-over';
+}
+
+function renderEnhancedParticles() {
+    particleCtx.globalCompositeOperation = 'destination-out';
+    particleCtx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+    particleCtx.fillRect(0, 0, width, height);
+    
+    particleCtx.globalCompositeOperation = 'screen';
+    
+    // Render particles
+    particles.forEach(p => {
+        const alpha = easeOutCubic(p.life / p.maxLife);
+        particleCtx.globalAlpha = alpha;
+        
+        particleCtx.save();
+        particleCtx.translate(p.x, p.y);
+        particleCtx.rotate(p.rotation);
+        
+        if (p.type === 'energy') {
+            // Energy particles have a glow effect
+            particleCtx.shadowBlur = 15;
+            particleCtx.shadowColor = p.color;
+        }
+        
+        particleCtx.beginPath();
+        particleCtx.arc(0, 0, p.size * alpha, 0, Math.PI * 2);
+        particleCtx.fillStyle = p.color;
+        particleCtx.fill();
+        
+        particleCtx.restore();
+    });
+    
+    // Render energy orbs
+    energyOrbs.forEach(orb => {
+        const pulse = Math.sin(orb.pulsePhase) * 0.3 + 0.7;
+        const alpha = orb.life * pulse;
+        
+        particleCtx.globalAlpha = alpha * 0.6;
+        particleCtx.shadowBlur = 25;
+        particleCtx.shadowColor = orb.color;
+        
+        particleCtx.beginPath();
+        particleCtx.arc(orb.x, orb.y, orb.radius * pulse, 0, Math.PI * 2);
+        particleCtx.fillStyle = orb.color;
+        particleCtx.fill();
+        
+        // Inner core
+        particleCtx.globalAlpha = alpha;
+        particleCtx.beginPath();
+        particleCtx.arc(orb.x, orb.y, orb.radius * 0.3, 0, Math.PI * 2);
+        particleCtx.fillStyle = '#ffffff';
+        particleCtx.fill();
+    });
+    
+    // Render ripples
+    ripples.forEach(r => {
+        particleCtx.globalAlpha = r.life;
+        particleCtx.beginPath();
+        particleCtx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+        particleCtx.strokeStyle = r.color;
+        particleCtx.lineWidth = r.thickness * r.life;
+        particleCtx.shadowBlur = 10;
+        particleCtx.shadowColor = r.color;
+        particleCtx.stroke();
+    });
+    
+    particleCtx.globalAlpha = 1.0;
+    particleCtx.shadowBlur = 0;
+    particleCtx.globalCompositeOperation = 'source-over';
+}
+
+/**
+ * ENHANCED MAIN RENDER LOOP
+ */
+function renderLoop(timestamp) {
+    requestAnimationFrame(renderLoop);
+    
+    let dt = (timestamp - lastTime) / 1000;
+    lastTime = timestamp;
+    time += dt;
+
+    // Update FPS
+    framesThisSecond++;
+    if (timestamp > lastFpsTime + 1000) {
+        uiFps.innerText = framesThisSecond;
+        framesThisSecond = 0;
+        lastFpsTime = timestamp;
+    }
+
+    // Update UI
+    uiSpeed.innerText = Math.round(handVelocities * 100);
+    uiEnergy.innerText = Math.round(energyLevel * 100) + '%';
+
+    drawEnhancedBackground();
+    updateEnhancedPhysics();
+    renderEnhancedParticles();
+
+    // Main canvas for hand rendering
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.fillRect(0, 0, width, height);
+    
+    ctx.globalCompositeOperation = 'screen';
+
+    if (currentHands.length > 0) {
+        currentHands.forEach((hand, handIndex) => {
+            const theme = themes[currentTheme];
+            const glowColor = theme.color(time, handIndex, 2);
+            
+            // Enhanced skeleton rendering
+            drawConnectors(ctx, hand, HAND_CONNECTIONS, {
+                color: glowColor,
+                lineWidth: 3 + energyLevel * 2
+            });
+            
+            // Enhanced fingertip rendering
+            ctx.shadowBlur = 20 + energyLevel * 15;
+            ctx.shadowColor = glowColor;
+            
+            FINGER_TIPS.forEach((tipIndex, idx) => {
+                const pt = mapToCanvas(hand[tipIndex]);
+                const tipColor = theme.particle(time, idx);
+                
+                // Main fingertip
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, 5 + energyLevel * 3, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+                
+                // Outer glow ring
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, 8 + energyLevel * 5, 0, Math.PI * 2);
+                ctx.strokeStyle = tipColor;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Continuous particle generation
+                if (Math.random() > 0.7 - energyLevel * 0.3) {
+                    createParticle(pt, tipColor, 'spark');
+                }
+            });
+            
+            ctx.shadowBlur = 0;
+        });
+
+        // Enhanced cross-hand interactions
+        if (currentHands.length >= 2) {
+            const h1 = currentHands[0];
+            const h2 = currentHands[1];
+            const theme = themes[currentTheme];
+
+            FINGER_TIPS.forEach((tipIndex, idx) => {
+                const pt1 = mapToCanvas(h1[tipIndex]);
+                const pt2 = mapToCanvas(h2[tipIndex]);
+                const dist = getDist(pt1, pt2);
+                
+                if (dist < 200) {
+                    // Enhanced lightning effect
+                    const intensity = (200 - dist) / 200;
+                    
+                    if (Math.random() > 0.3) {
+                        ctx.beginPath();
+                        ctx.moveTo(pt1.x, pt1.y);
+                        
+                        // Multiple lightning segments
+                        const segments = 3 + Math.floor(intensity * 3);
+                        for (let s = 1; s < segments; s++) {
+                            const t = s / segments;
+                            const x = lerp(pt1.x, pt2.x, t) + (Math.random() - 0.5) * 60 * intensity;
+                            const y = lerp(pt1.y, pt2.y, t) + (Math.random() - 0.5) * 60 * intensity;
+                            ctx.lineTo(x, y);
+                        }
+                        ctx.lineTo(pt2.x, pt2.y);
+                        
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.shadowBlur = 25;
+                        ctx.shadowColor = theme.color(time, idx, 5);
+                        ctx.lineWidth = 2 + intensity * 3;
+                        ctx.stroke();
+                    }
+                    
+                    // Enhanced gradient connections
+                    ctx.beginPath();
+                    ctx.moveTo(pt1.x, pt1.y);
+                    ctx.lineTo(pt2.x, pt2.y);
+                    
+                    let grad = ctx.createLinearGradient(pt1.x, pt1.y, pt2.x, pt2.y);
+                    grad.addColorStop(0, theme.color(time, idx, 5));
+                    grad.addColorStop(0.5, theme.particle(time, idx));
+                    grad.addColorStop(1, theme.color(time, idx + 2, 5));
+                    
+                    ctx.strokeStyle = grad;
+                    ctx.lineWidth = 3 + intensity * 4;
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = theme.color(time, idx, 5);
+                    ctx.stroke();
+                }
+            });
+        }
+        
+        detectEnhancedGestures();
+    }
+    
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowBlur = 0;
+}
+
+/**
+ * MEDIAPIPE INITIALIZATION (Enhanced)
+ */
+function initMediaPipe() {
+    const hands = new Hands({locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
+
+    hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.8,
+        minTrackingConfidence: 0.8
+    });
+
+    hands.onResults((results) => {
+        if (!audioCtx) return;
+
+        uiHands.innerText = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+        
+        // Enhanced velocity calculation
+        if (currentHands.length > 0 && results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            let totalVelocity = 0;
+            let velocityCount = 0;
+            
+            results.multiHandLandmarks.forEach((hand, idx) => {
+                if (currentHands[idx]) {
+                    FINGER_TIPS.forEach(tipIndex => {
+                        const oldP = currentHands[idx][tipIndex];
+                        const newP = hand[tipIndex];
+                        if (oldP && newP) {
+                            totalVelocity += getDist(oldP, newP);
+                            velocityCount++;
+                        }
+                    });
+                }
+            });
+            
+            handVelocities = velocityCount > 0 ? totalVelocity / velocityCount : 0;
+        } else {
+            handVelocities = 0;
+        }
+
+        currentHands = results.multiHandLandmarks || [];
+        updateEnhancedHum(currentHands);
+    });
+
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
+            await hands.send({image: videoElement});
+        },
+        width: 1280,
+        height: 720,
+        facingMode: 'user'
+    });
+    
+    camera.start();
+}
+
+</script>
+</body>
+</html>
