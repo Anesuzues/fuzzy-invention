@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced AR Hand Tracking</title>
+    
+    <!-- MediaPipe Hands CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --bg-color: #0a0a0f;
+            --text-color: #ffffff;
+            --glass-bg: rgba(15, 20, 35, 0.6);
+            --glass-border: rgba(255, 255, 255, 0.2);
+            --glass-blur: blur(20px);
+            --accent: #00ffcc;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%);
+            color: var(--text-color);
+            overflow: hidden;
+        }
+
+        .video-container {
+            position: absolute;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        .input_video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 1;
+            filter: brightness(0.4) contrast(1.2) saturate(1.1);
+        }
+
+        #bgCanvas, #mainCanvas, #particleCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            pointer-events: none;
+        }
+        
+        #bgCanvas { z-index: 2; }
+        #particleCanvas { z-index: 3; }
+        #mainCanvas { z-index: 4; }
+
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            pointer-events: none;
+        }
+
+        .panel {
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 20px 25px;
+            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6);
+        }
+
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 0.95rem;
+            color: rgba(255, 255, 255, 0.9);
+            min-width: 200px;
+        }
+        .stat:last-child { margin-bottom: 0; }
+        .stat span.val { 
+            font-weight: bold; 
+            color: var(--accent);
+            text-shadow: 0 0 10px currentColor;
+        }
+
+        #themes {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            gap: 12px;
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: 40px;
+            padding: 12px;
+        }
+
+        .theme-btn {
+            background: transparent;
+            border: 2px solid transparent;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+        
+        .theme-btn.active {
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.4);
+            text-shadow: 0 0 15px white;
+            box-shadow: 0 0 20px rgba(255,255,255,0.3);
+        }
+
+        #startOverlay {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(0,0,0,0.9) 0%, rgba(20,20,40,0.95) 100%);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(15px);
+            transition: all 0.8s ease;
+        }
+
+        .start-title {
+            font-size: 3.5rem;
+            font-weight: 100;
+            letter-spacing: 8px;
+            margin-bottom: 20px;
+            background: linear-gradient(45deg, #ff00cc, #00f0ff, #ffff00, #ff00cc);
+            background-size: 400% 400%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: gradientShift 3s ease-in-out infinite;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        .start-btn {
+            padding: 20px 50px;
+            font-size: 1.3rem;
+            background: linear-gradient(45deg, #ff00cc, #3333ff, #00ffcc);
+            background-size: 300% 300%;
+            border: none;
+            color: white;
+            border-radius: 40px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            transition: all 0.3s ease;
+            animation: buttonGlow 2s ease-in-out infinite alternate;
+        }
+
+        @keyframes buttonGlow {
+            0% { box-shadow: 0 0 20px rgba(255, 0, 204, 0.5); }
+            100% { box-shadow: 0 0 40px rgba(255, 0, 204, 0.8), 0 0 60px rgba(0, 240, 255, 0.3); }
+        }
+
+        .start-btn:hover { 
+            transform: scale(1.05);
+            background-position: 100% 0;
+        }
+
+        .hidden { 
+            opacity: 0; 
+            pointer-events: none; 
+            transform: translateY(20px);
+        }
+    </style>
+</head>
+<body>
+    <div id="startOverlay">
+        <h1 class="start-title">ENHANCED AR</h1>
+        <p style="margin-bottom: 40px; color: #aaa; font-size: 1.1rem;">Advanced hand tracking with enhanced effects</p>
+        <button class="start-btn" id="startBtn">Enter Experience</button>
+    </div>
+
+    <div class="video-container">
+        <video class="input_video" autoplay playsinline></video>
+        <canvas id="bgCanvas"></canvas>
+        <canvas id="particleCanvas"></canvas>
+        <canvas id="mainCanvas"></canvas>
+    </div>
+
+    <div id="hud" class="hidden">
+        <div class="panel">
+            <div class="stat">Hands Detected: <span class="val" id="ui-hands">0</span></div>
+            <div class="stat">Hand Speed: <span class="val" id="ui-speed">0</span></div>
+            <div class="stat">FPS: <span class="val" id="ui-fps">0</span></div>
+        </div>
+        <div class="panel">
+            <div class="stat">Gesture: <span class="val" id="ui-gesture">None</span></div>
+            <div class="stat">Spread: <span class="val" id="ui-spread">0%</span></div>
+            <div class="stat">Energy: <span class="val" id="ui-energy">0%</span></div>
+        </div>
+    </div>
+
+    <div id="themes" class="hidden">
+        <button class="theme-btn active" data-theme="Rainbow">Rainbow</button>
+        <button class="theme-btn" data-theme="Cyberpunk">Cyberpunk</button>
+        <button class="theme-btn" data-theme="Lava">Lava</button>
+        <button class="theme-btn" data-theme="Ocean">Ocean</button>
+        <button class="theme-btn" data-theme="Galaxy">Galaxy</button>
+        <button class="theme-btn" data-theme="Aurora">Aurora</button>
+    </div>
+
+<script>
+// Enhanced AR Script - Simplified version
+const videoElement = document.querySelector('.input_video');
+const bgCanvas = document.getElementById('bgCanvas');
+const mainCanvas = document.getElementById('mainCanvas');
+const particleCanvas = document.getElementById('particleCanvas');
+const bgCtx = bgCanvas.getContext('2d');
+const ctx = mainCanvas.getContext('2d');
+const particleCtx = particleCanvas.getContext('2d');
+
+let width = window.innerWidth;
+let height = window.innerHeight;
+let time = 0;
+let lastTime = performance.now();
+let framesThisSecond = 0;
+let lastFpsTime = performance.now();
+let currentHands = [];
+let handVelocities = 0;
+let energyLevel = 0;
+
+let currentTheme = 'Rainbow';
+const themes = {
+    'Rainbow': (t, index, total) => `hsl(${(t * 80 + index * (360/total)) % 360}, 90%, 65%)`,
+    'Cyberpunk': (t, index, total) => (index % 2 === 0) ? '#ff0080' : '#00ffff',
+    'Lava': (t, index, total) => `hsl(${(15 + Math.sin(t + index) * 20)}, 100%, ${60 + Math.sin(t * 2) * 15}%)`,
+    'Ocean': (t, index, total) => `hsl(${200 + Math.sin(t + index) * 40}, 80%, 60%)`,
+    'Galaxy': (t, index, total) => `hsl(${280 + Math.sin(t * 1.5 + index) * 50}, 90%, 70%)`,
+    'Aurora': (t, index, total) => `hsl(${120 + Math.sin(t * 0.8 + index) * 100}, 70%, 60%)`
+};
+
+let particles = [];
+let ripples = [];
+const FINGER_TIPS = [4, 8, 12, 16, 20];
+
+let matrixColumns = [];
+const fontSize = 14;
+let maxColumns = 0;
+
+const uiHands = document.getElementById('ui-hands');
+const uiFps = document.getElementById('ui-fps');
+const uiGesture = document.getElementById('ui-gesture');
+const uiSpread = document.getElementById('ui-spread');
+const uiSpeed = document.getElementById('ui-speed');
+const uiEnergy = document.getElementById('ui-energy');
+
+function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    
+    [bgCanvas, mainCanvas, particleCanvas].forEach(canvas => {
+        canvas.width = width;
+        canvas.height = height;
+    });
+    
+    maxColumns = Math.floor(width / fontSize);
+    matrixColumns = new Array(maxColumns).fill(1).map(() => Math.random() * height/fontSize);
+}
+
+window.addEventListener('resize', resize);
+resize();
+
+document.querySelectorAll('.theme-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        currentTheme = e.target.getAttribute('data-theme');
+    });
+});
+
+document.getElementById('startBtn').addEventListener('click', () => {
+    document.getElementById('startOverlay').classList.add('hidden');
+    document.getElementById('hud').classList.remove('hidden');
+    document.getElementById('themes').classList.remove('hidden');
+    
+    initMediaPipe();
+    requestAnimationFrame(renderLoop);
+});
+
+function getDist(p1, p2) {
+    return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+}
+
+function mapToCanvas(point) {
+    return { x: point.x * width, y: point.y * height };
+}
+
+function createParticle(pos, color) {
+    particles.push({
+        x: pos.x,
+        y: pos.y,
+        vx: (Math.random() - 0.5) * 12,
+        vy: (Math.random() - 0.5) * 12,
+        life: 1.0,
+        color: color,
+        size: Math.random() * 4 + 2
+    });
+}
+
+function createRipple(pos, color) {
+    ripples.push({
+        x: pos.x,
+        y: pos.y,
+        radius: 0,
+        maxRadius: 150 + Math.random() * 100,
+        life: 1.0,
+        color: color
+    });
+}
+
+let lastPinchState = [false, false];
+
+function detectGestures() {
+    if (!currentHands.length) return;
+    
+    currentHands.forEach((hand, idx) => {
+        const thumb = hand[4];
+        const index = hand[8];
+        const dist = getDist(thumb, index);
+        
+        const isPinching = dist < 0.04;
+        
+        if (isPinching && !lastPinchState[idx]) {
+            const midpoint = mapToCanvas({
+                x: (thumb.x + index.x) / 2, 
+                y: (thumb.y + index.y) / 2
+            });
+            
+            createRipple(midpoint, themes[currentTheme](time, idx, 2));
+            
+            for (let i = 0; i < 8; i++) {
+                createParticle(midpoint, themes[currentTheme](time, i, 8));
+            }
+            
+            energyLevel = Math.min(energyLevel + 0.1, 1.0);
+            uiGesture.innerText = "PINCH BURST!";
+        }
+        lastPinchState[idx] = isPinching;
+        
+        const spread = getDist(hand[8], hand[20]);
+        let spreadPct = Math.min(Math.round(spread * 250), 100);
+        uiSpread.innerText = spreadPct + '%';
+        
+        if (!isPinching) {
+            uiGesture.innerText = spreadPct > 60 ? "Open Hand" : spreadPct < 30 ? "Fist" : "Relaxed";
+        }
+    });
+}
+
+function updatePhysics() {
+    // Update particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 0.016;
+        p.vy += 0.2; // Gravity
+        p.vx *= 0.98; // Air resistance
+        
+        if (p.life <= 0) {
+            particles.splice(i, 1);
+        }
+    }
+    
+    // Update ripples
+    for (let i = ripples.length - 1; i >= 0; i--) {
+        let r = ripples[i];
+        r.radius += (r.maxRadius - r.radius) * 0.1;
+        r.life -= 0.02;
+        
+        if (r.life <= 0) {
+            ripples.splice(i, 1);
+        }
+    }
+    
+    // Decay energy level
+    energyLevel = Math.max(energyLevel - 0.002, 0);
+}
+
+function drawBackground() {
+    bgCtx.globalCompositeOperation = 'source-over';
+    bgCtx.fillStyle = '#0a0a0f';
+    bgCtx.fillRect(0, 0, width, height);
+    
+    bgCtx.globalCompositeOperation = 'screen';
+    bgCtx.font = fontSize + "px monospace";
+    
+    const speedMult = 1 + (handVelocities * 50) + (energyLevel * 30);
+    
+    for (let i = 0; i < matrixColumns.length; i++) {
+        if (Math.random() > 0.92) {
+            const char = String.fromCharCode(0x30A0 + Math.random() * 96);
+            bgCtx.fillStyle = themes[currentTheme](time, i % 10, 10);
+            bgCtx.globalAlpha = 0.3 + energyLevel * 0.4;
+            bgCtx.fillText(char, i * fontSize, matrixColumns[i] * fontSize);
+        }
+        
+        matrixColumns[i] += Math.random() * speedMult;
+        
+        if (matrixColumns[i] * fontSize > height && Math.random() > 0.85) {
+            matrixColumns[i] = 0;
+        }
+    }
+    
+    bgCtx.globalAlpha = 1.0;
+}
+
+function renderParticles() {
+    particleCtx.globalCompositeOperation = 'destination-out';
+    particleCtx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+    particleCtx.fillRect(0, 0, width, height);
+    
+    particleCtx.globalCompositeOperation = 'screen';
+    
+    // Render particles
+    particles.forEach(p => {
+        particleCtx.globalAlpha = p.life;
+        particleCtx.beginPath();
+        particleCtx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        particleCtx.fillStyle = p.color;
+        particleCtx.fill();
+    });
+    
+    // Render ripples
+    ripples.forEach(r => {
+        particleCtx.globalAlpha = r.life;
+        particleCtx.beginPath();
+        particleCtx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+        particleCtx.strokeStyle = r.color;
+        particleCtx.lineWidth = 4 * r.life;
+        particleCtx.stroke();
+    });
+    
+    particleCtx.globalAlpha = 1.0;
+}
+
+function renderLoop(timestamp) {
+    requestAnimationFrame(renderLoop);
+    
+    let dt = (timestamp - lastTime) / 1000;
+    lastTime = timestamp;
+    time += dt;
+
+    // Update FPS
+    framesThisSecond++;
+    if (timestamp > lastFpsTime + 1000) {
+        uiFps.innerText = framesThisSecond;
+        framesThisSecond = 0;
+        lastFpsTime = timestamp;
+    }
+
+    // Update UI
+    uiSpeed.innerText = Math.round(handVelocities * 100);
+    uiEnergy.innerText = Math.round(energyLevel * 100) + '%';
+
+    drawBackground();
+    updatePhysics();
+    renderParticles();
+
+    // Main canvas for hand rendering
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.fillRect(0, 0, width, height);
+    
+    ctx.globalCompositeOperation = 'screen';
+
+    if (currentHands.length > 0) {
+        currentHands.forEach((hand, handIndex) => {
+            const glowColor = themes[currentTheme](time, handIndex, 2);
+            
+            // Draw hand skeleton
+            drawConnectors(ctx, hand, HAND_CONNECTIONS, {
+                color: glowColor,
+                lineWidth: 3 + energyLevel * 2
+            });
+            
+            // Draw fingertips
+            ctx.shadowBlur = 20 + energyLevel * 15;
+            ctx.shadowColor = glowColor;
+            
+            FINGER_TIPS.forEach((tipIndex, idx) => {
+                const pt = mapToCanvas(hand[tipIndex]);
+                const tipColor = themes[currentTheme](time, idx, FINGER_TIPS.length);
+                
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, 5 + energyLevel * 3, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+                
+                // Generate particles
+                if (Math.random() > 0.7 - energyLevel * 0.3) {
+                    createParticle(pt, tipColor);
+                }
+            });
+            
+            ctx.shadowBlur = 0;
+        });
+
+        // Cross-hand interactions
+        if (currentHands.length >= 2) {
+            const h1 = currentHands[0];
+            const h2 = currentHands[1];
+
+            FINGER_TIPS.forEach((tipIndex, idx) => {
+                const pt1 = mapToCanvas(h1[tipIndex]);
+                const pt2 = mapToCanvas(h2[tipIndex]);
+                const dist = getDist(pt1, pt2);
+                
+                if (dist < 200) {
+                    const intensity = (200 - dist) / 200;
+                    
+                    // Lightning effect
+                    if (Math.random() > 0.3) {
+                        ctx.beginPath();
+                        ctx.moveTo(pt1.x, pt1.y);
+                        
+                        const segments = 3;
+                        for (let s = 1; s < segments; s++) {
+                            const t = s / segments;
+                            const x = pt1.x + (pt2.x - pt1.x) * t + (Math.random() - 0.5) * 60 * intensity;
+                            const y = pt1.y + (pt2.y - pt1.y) * t + (Math.random() - 0.5) * 60 * intensity;
+                            ctx.lineTo(x, y);
+                        }
+                        ctx.lineTo(pt2.x, pt2.y);
+                        
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.shadowBlur = 25;
+                        ctx.shadowColor = themes[currentTheme](time, idx, 5);
+                        ctx.lineWidth = 2 + intensity * 3;
+                        ctx.stroke();
+                    }
+                    
+                    // Gradient line
+                    ctx.beginPath();
+                    ctx.moveTo(pt1.x, pt1.y);
+                    ctx.lineTo(pt2.x, pt2.y);
+                    
+                    let grad = ctx.createLinearGradient(pt1.x, pt1.y, pt2.x, pt2.y);
+                    grad.addColorStop(0, themes[currentTheme](time, idx, 5));
+                    grad.addColorStop(0.5, themes[currentTheme](time, idx + 1, 5));
+                    grad.addColorStop(1, themes[currentTheme](time, idx + 2, 5));
+                    
+                    ctx.strokeStyle = grad;
+                    ctx.lineWidth = 3 + intensity * 4;
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = themes[currentTheme](time, idx, 5);
+                    ctx.stroke();
+                }
+            });
+        }
+        
+        detectGestures();
+    }
+    
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowBlur = 0;
+}
+
+function initMediaPipe() {
+    const hands = new Hands({locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
+
+    hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.8,
+        minTrackingConfidence: 0.8
+    });
+
+    hands.onResults((results) => {
+        uiHands.innerText = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+        
+        // Calculate velocity
+        if (currentHands.length > 0 && results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            let totalVelocity = 0;
+            let velocityCount = 0;
+            
+            results.multiHandLandmarks.forEach((hand, idx) => {
+                if (currentHands[idx]) {
+                    FINGER_TIPS.forEach(tipIndex => {
+                        const oldP = currentHands[idx][tipIndex];
+                        const newP = hand[tipIndex];
+                        if (oldP && newP) {
+                            totalVelocity += getDist(oldP, newP);
+                            velocityCount++;
+                        }
+                    });
+                }
+            });
+            
+            handVelocities = velocityCount > 0 ? totalVelocity / velocityCount : 0;
+        } else {
+            handVelocities = 0;
+        }
+
+        currentHands = results.multiHandLandmarks || [];
+    });
+
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
+            await hands.send({image: videoElement});
+        },
+        width: 1280,
+        height: 720,
+        facingMode: 'user'
+    });
+    
+    camera.start();
+}
+
+</script>
+</body>
+</html>
