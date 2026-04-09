@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Debug Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: white;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        video {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            border: 2px solid #00ffcc;
+            border-radius: 10px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .success { background: #004d00; color: #00ff00; }
+        .error { background: #4d0000; color: #ff0000; }
+        .warning { background: #4d4d00; color: #ffff00; }
+        .info { background: #003d4d; color: #00ccff; }
+        button {
+            background: #00ffcc;
+            color: black;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:hover {
+            background: #00ccaa;
+        }
+        .debug-info {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 Camera Debug Test</h1>
+        
+        <div id="status-container">
+            <div class="status info">Click "Test Camera" to start debugging...</div>
+        </div>
+
+        <button onclick="testCamera()">Test Camera</button>
+        <button onclick="testBrowser()">Check Browser Support</button>
+        <button onclick="testPermissions()">Test Permissions</button>
+
+        <video id="video" autoplay playsinline style="display: none;"></video>
+
+        <div class="debug-info">
+            <h3>Debug Information:</h3>
+            <div id="debug-log"></div>
+        </div>
+
+        <div class="debug-info">
+            <h3>Browser Info:</h3>
+            <div id="browser-info"></div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const statusContainer = document.getElementById('status-container');
+        const debugLog = document.getElementById('debug-log');
+        const browserInfo = document.getElementById('browser-info');
+
+        function addStatus(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `status ${type}`;
+            div.textContent = message;
+            statusContainer.appendChild(div);
+            
+            // Also add to debug log
+            const timestamp = new Date().toLocaleTimeString();
+            debugLog.innerHTML += `<div>[${timestamp}] ${type.toUpperCase()}: ${message}</div>`;
+        }
+
+        function testBrowser() {
+            addStatus('Testing browser compatibility...', 'info');
+            
+            // Check basic support
+            if (!navigator.mediaDevices) {
+                addStatus('❌ navigator.mediaDevices not supported', 'error');
+                return;
+            }
+            
+            if (!navigator.mediaDevices.getUserMedia) {
+                addStatus('❌ getUserMedia not supported', 'error');
+                return;
+            }
+            
+            addStatus('✅ Basic camera API supported', 'success');
+            
+            // Check HTTPS
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                addStatus('⚠️ Not using HTTPS - camera may be blocked', 'warning');
+            } else {
+                addStatus('✅ Using secure connection', 'success');
+            }
+            
+            // Browser detection
+            const userAgent = navigator.userAgent;
+            let browser = 'Unknown';
+            
+            if (userAgent.includes('Chrome')) browser = 'Chrome';
+            else if (userAgent.includes('Firefox')) browser = 'Firefox';
+            else if (userAgent.includes('Safari')) browser = 'Safari';
+            else if (userAgent.includes('Edge')) browser = 'Edge';
+            
+            addStatus(`Browser: ${browser}`, 'info');
+            
+            browserInfo.innerHTML = `
+                <strong>User Agent:</strong> ${userAgent}<br>
+                <strong>Protocol:</strong> ${location.protocol}<br>
+                <strong>Host:</strong> ${location.hostname}<br>
+                <strong>MediaDevices:</strong> ${!!navigator.mediaDevices}<br>
+                <strong>getUserMedia:</strong> ${!!navigator.mediaDevices?.getUserMedia}
+            `;
+        }
+
+        async function testPermissions() {
+            addStatus('Testing camera permissions...', 'info');
+            
+            try {
+                const permissions = await navigator.permissions.query({name: 'camera'});
+                addStatus(`Camera permission: ${permissions.state}`, 
+                    permissions.state === 'granted' ? 'success' : 
+                    permissions.state === 'denied' ? 'error' : 'warning');
+                
+                permissions.addEventListener('change', () => {
+                    addStatus(`Permission changed to: ${permissions.state}`, 'info');
+                });
+                
+            } catch (error) {
+                addStatus(`Permission check failed: ${error.message}`, 'warning');
+            }
+        }
+
+        async function testCamera() {
+            addStatus('Starting camera test...', 'info');
+            
+            try {
+                // First, check if we can enumerate devices
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                
+                addStatus(`Found ${videoDevices.length} camera(s)`, 'info');
+                
+                if (videoDevices.length === 0) {
+                    addStatus('❌ No cameras found', 'error');
+                    return;
+                }
+                
+                // Try to get camera stream
+                addStatus('Requesting camera access...', 'info');
+                
+                const constraints = {
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        facingMode: 'user'
+                    }
+                };
+                
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                
+                addStatus('✅ Camera access granted!', 'success');
+                
+                // Display video
+                video.srcObject = stream;
+                video.style.display = 'block';
+                
+                // Get actual video settings
+                const track = stream.getVideoTracks()[0];
+                const settings = track.getSettings();
+                
+                addStatus(`Camera resolution: ${settings.width}x${settings.height}`, 'info');
+                addStatus(`Frame rate: ${settings.frameRate} fps`, 'info');
+                
+                // Test video playing
+                video.addEventListener('loadedmetadata', () => {
+                    addStatus('✅ Video stream is working!', 'success');
+                });
+                
+                video.addEventListener('error', (e) => {
+                    addStatus(`❌ Video error: ${e.message}`, 'error');
+                });
+                
+            } catch (error) {
+                addStatus(`❌ Camera test failed: ${error.name} - ${error.message}`, 'error');
+                
+                // Specific error handling
+                if (error.name === 'NotAllowedError') {
+                    addStatus('Camera access was denied. Please allow camera permissions.', 'error');
+                } else if (error.name === 'NotFoundError') {
+                    addStatus('No camera found. Please connect a camera.', 'error');
+                } else if (error.name === 'NotReadableError') {
+                    addStatus('Camera is being used by another application.', 'error');
+                } else if (error.name === 'OverconstrainedError') {
+                    addStatus('Camera constraints could not be satisfied.', 'error');
+                }
+            }
+        }
+
+        // Auto-run browser test on load
+        window.addEventListener('load', () => {
+            testBrowser();
+        });
+    </script>
+</body>
+</html>
